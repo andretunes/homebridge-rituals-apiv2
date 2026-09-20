@@ -7,7 +7,6 @@ const axios = require('axios');
 const qs = require('querystring');
 
 const version = require('./package.json').version;
-const author = require('./package.json').author.name;
 
 let Service;
 let Characteristic;
@@ -85,6 +84,11 @@ function RitualsAccessory(log, config) {
         .getCharacteristic(Characteristic.CurrentHumidifierDehumidifierState)
         .on('get', this.getHumidifierState.bind(this));
 
+    // Drives the Home app's radial dial with the perfume fill level instead of a static value
+    this.service
+        .getCharacteristic(Characteristic.CurrentRelativeHumidity)
+        .on('get', this.getFillState.bind(this));
+
     this.service
         .getCharacteristic(Characteristic.TargetHumidifierDehumidifierState)
         .setProps({
@@ -99,7 +103,7 @@ function RitualsAccessory(log, config) {
 
     this.serviceInfo = new Service.AccessoryInformation();
     this.serviceInfo
-        .setCharacteristic(Characteristic.Manufacturer, author)
+        .setCharacteristic(Characteristic.Manufacturer, 'Rituals')
         .setCharacteristic(
             Characteristic.Model,
             'Rituals Genie ' + this.model_version
@@ -422,6 +426,8 @@ RitualsAccessory.prototype = {
             that.fragance = 'Unknown';
             that.storage.put('fragance', that.fragance);
 
+            that.storeGenieVersion(that.hub);
+
             that.log.debug('RitualsAccessory -> hub 1 genie updated');
         } else {
             let found = false;
@@ -444,6 +450,8 @@ RitualsAccessory.prototype = {
                     that.storage.put('hublot', that.hublot);
                     that.storage.put('fragance', that.fragance);
 
+                    that.storeGenieVersion(that.hub);
+
                     that.log.debug('RitualsAccessory -> HUB matched and preferences stored');
                 }
             });
@@ -464,6 +472,22 @@ RitualsAccessory.prototype = {
                 that.log.info('************************************************');
             }
         }
+    },
+
+    storeGenieVersion: function(hub) {
+        const that = this;
+
+        that.makeAuthenticatedRequest('get', `apiv2/hubs/${hub}/sensors/versionc`, null, function(err, versionRes) {
+            if (err) {
+                that.log.debug(`Error while retrieving versionc: ${err}`);
+                return;
+            }
+
+            if (versionRes && versionRes.value) {
+                that.storage.put('version', versionRes.value);
+                that.log.debug(`RitualsAccessory -> Genie firmware version stored :: ${versionRes.value}`);
+            }
+        });
     },
 
     getCurrentState: function(callback) {
