@@ -19,6 +19,9 @@ With this plugin you can do
 
 - _Siri, turn on the Genie._
 - _Siri, turn off the Genie._
+- _Siri, set the Genie to high._
+
+The Genie shows up in the Home app as a Humidifier, with on/off control, an intensity slider (low/medium/high) and the perfume cartridge level shown as a filter.
 
 #### Before begin, (assumptions)
 
@@ -48,6 +51,7 @@ One installed, you must modify your config.json file and add the following data:
 2. account (Required) = "xxxx@xxx.com" < that is the mail you are using in Rituals App Registration.
 3. password (Required) = "yyyyyyyy" < that is the password you are using in Rituals App.
 4. name (Optional) = "my Genie" < a name that you can assign, if not, "Genie" name has been assigned.
+5. battery (Optional) = true/false < only set this to `true` if you own the **original Genie 1.0**, which has a battery pack. Defaults to `false` (no Battery service), which is correct for the Genie 2.0.
 
 SAVE your config.json file and RESTART homebridge.
 
@@ -57,7 +61,8 @@ SAVE your config.json file and RESTART homebridge.
 "accessory": "Rituals",
 "name": "My Genie",
 "account": "xxx@xxx.com",
-"password": "yyyyyyy"
+"password": "yyyyyyy",
+"battery": false
 }
 ],
 ```
@@ -73,7 +78,8 @@ If you have more than one genie in your account, use the standard config for the
 "accessory": "Rituals",
 "name": "Genie",
 "account": "xxx@xxx.com",
-"password": "yyyyyyy"
+"password": "yyyyyyy",
+"battery": false
 }
 ],
 ```
@@ -112,14 +118,16 @@ If you have more than one genie in your account, use the standard config for the
 "name": "Genie 01",
 "account": "xxx@xxx.com",
 "password": "yyyyyyy",
-"hub": "f0123456789f0123456789f0123456789f0123456789f0123456789f01234567"
+"hub": "f0123456789f0123456789f0123456789f0123456789f0123456789f01234567",
+"battery": true
 },
 {
 "accessory": "Rituals",
 "name": "Genie 02",
 "account": "xxx@xxx.com",
 "password": "yyyyyyy",
-"hub": "a0123456789a0123456789a0123456789a0123456789a0123456789a01234567"
+"hub": "a0123456789a0123456789a0123456789a0123456789a0123456789a01234567",
+"battery": false
 }
 ],
 ```
@@ -131,6 +139,13 @@ This project is a fork and update of homebridge-rituals by myluna08.
 Rituals & Genie are registered trademarks of Rituals Cosmetics Enterprise B.V.
 
 ## 07. ChangeLog
+
+- 2.1.0 Breaking Changes:
+  - Accessory type changed from Fan to HumidifierDehumidifier, since it matches what the Genie actually does much better
+  - RotationSpeed now maps to the real `speedc` intensity levels (low/med/high) documented by the Rituals apiv2, instead of a plain Fan speed
+  - CurrentRelativeHumidity mirrors the perfume fill level, so the Home app's dial shows something meaningful instead of a bare toggle
+  - Removed the unreliable firmware-based Genie 1.0/2.0 detection (a real Genie 2 was being misdetected as 1.0, showing a fake battery at 100%). The Battery service is now opt-in via `"battery": true` in config.json for owners of the original Genie 1.0
+  - Manufacturer now shows as "Rituals" in the accessory's HomeKit info
 
 - 2.0.0 Breaking Changes:
   - Migrated from legacy API (ocapi, api/account/hubs) to API v2 (apiv2/...)
