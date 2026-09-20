@@ -49,8 +49,7 @@ function RitualsAccessory(log, config) {
         this.hub;
     this.log.debug('RitualsAccessory -> storage path is :: ' + this.user);
 
-    this.on_state;
-    this.fan_speed;
+    this.on_state = false;
     this.account = config.account;
     this.password = config.password;
 
@@ -76,38 +75,26 @@ function RitualsAccessory(log, config) {
         this.model_version = '2.0';
     }
 
-    this.service = new Service.Fan(this.name, 'AirFresher');
+    this.service = new Service.HumidifierDehumidifier(this.name, 'AirFresher');
     this.service
-        .getCharacteristic(Characteristic.On)
-        .on('get', this.getCurrentState.bind(this))
+        .getCharacteristic(Characteristic.Active)
+        .on('get', this.getActiveState.bind(this))
         .on('set', this.setActiveState.bind(this));
 
     this.service
-        .getCharacteristic(Characteristic.RotationSpeed)
+        .getCharacteristic(Characteristic.CurrentHumidifierDehumidifierState)
+        .on('get', this.getHumidifierState.bind(this));
+
+    this.service
+        .getCharacteristic(Characteristic.TargetHumidifierDehumidifierState)
         .setProps({
-            minValue: 0,   // HomeKit needs 0–100 %
-            maxValue: 100,
-            minStep: 1
+            validValues: [Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER]
         })
         .on('get', (callback) => {
-            // If off -> 0%, otherwise mapping 1..3 -> percentage values
-            if (!this.on_state) return callback(null, 0);
-            const speed = this.fan_speed ?? 1; // 1..3
-            const pct = speed === 1 ? 33 : speed === 2 ? 66 : 100;
-            callback(null, pct);
+            callback(null, Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER);
         })
         .on('set', (value, callback) => {
-            // 1-3 intern values
-            const pct = Math.max(0, Math.min(100, Math.round(Number(value))));
-            const mapped = (pct >= 67) ? 3 : (pct >= 34) ? 2 : 1;
-
-            this.setFanSpeed(mapped, (err) => {
-                if (err) return callback(err);
-                // Slider auf die exakten Buckets schnappen lassen
-                const snapPct = mapped === 3 ? 100 : mapped === 2 ? 66 : 33;
-                try { this.service.updateCharacteristic(Characteristic.RotationSpeed, snapPct); } catch (_) {}
-                callback();
-            });
+            callback();
         });
 
     this.serviceInfo = new Service.AccessoryInformation();
@@ -505,44 +492,31 @@ RitualsAccessory.prototype = {
             that.log.debug(`fancRes received: ${JSON.stringify(fancRes)}`);
 
             that.on_state = fancRes.value === '1';
+            that.cache.on_state = that.on_state;
+            that.cacheTimestamp.getCurrentState = now;
 
-            if (that.on_state) {
-                // Nur wenn eingeschaltet, speedc abrufen TODO: Returns {}
-                that.makeAuthenticatedRequest('get', `apiv2/hubs/${hub}/attributes/speedc`, null, function(err2, speedRes) {
-                    if (err2) {
-                        that.log.debug(`Error while retrieving speedc: ${err2}`);
-                        return callback(err2);
-                    }
+            that.log.debug(`Current status -> on_state: ${that.on_state}`);
 
-                    that.log.debug(`speedRes received: ${JSON.stringify(speedRes)}`);
-
-                    if (that.on_state) {
-                        that.fan_speed = parseInt(speedRes.value) || 1; // wenn API leer, mind. 1
-                    } else {
-                        that.fan_speed = 1; // wenn aus, trotzdem min gültiger Wert
-                    }
-                    that.cache.fan_speed = that.fan_speed;
-                    that.cache.on_state = that.on_state;
-                    that.cacheTimestamp.getCurrentState = now;
-
-                    that.log.debug(`Current status -> on_state: ${that.on_state}, fan_speed: ${that.fan_speed}`);
-
-                    callback(null, that.on_state);
-                });
-            } else {
-                // Ausgeschaltet → keine speedc-Abfrage
-                that.fan_speed = 0;
-                that.cache.fan_speed = that.fan_speed;
-                that.cache.on_state = that.on_state;
-                that.cacheTimestamp.getCurrentState = now;
-
-                that.log.debug(`Current status -> on_state: ${that.on_state}, fan_speed: ${that.fan_speed}`);
-
-                callback(null, that.on_state);
-            }
+            callback(null, that.on_state);
         });
 
         this.log.debug('RitualsAccessory -> finish :: getCurrentState()');
+    },
+
+    getActiveState: function(callback) {
+        this.getCurrentState((err, on_state) => {
+            if (err) return callback(err);
+            callback(null, on_state ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE);
+        });
+    },
+
+    getHumidifierState: function(callback) {
+        this.getCurrentState((err, on_state) => {
+            if (err) return callback(err);
+            callback(null, on_state
+                ? Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING
+                : Characteristic.CurrentHumidifierDehumidifierState.INACTIVE);
+        });
     },
 
     getFillState: function(callback) {
@@ -632,7 +606,8 @@ RitualsAccessory.prototype = {
         if (!hub) {
             return callback(new Error('Hub not resolved yet'), this.on_state);
         }
-        const setValue = active ? '1' : '0';
+        const on_state = active === Characteristic.Active.ACTIVE;
+        const setValue = on_state ? '1' : '0';
 
         const path = `apiv2/hubs/${hub}/attributes/fanc`;
         const body = qs.stringify({ fanc: setValue });
@@ -649,56 +624,19 @@ RitualsAccessory.prototype = {
 
             that.log.debug(`Response from server: ${JSON.stringify(response)}`);
 
-            that.on_state = active;
-            that.cache.on_state = active;
+            that.on_state = on_state;
+            that.cache.on_state = on_state;
             that.cacheTimestamp.getCurrentState = Date.now();
 
-            callback();
-        });
-    },
-
-    setFanSpeed: function(value, callback) {
-        const that = this;
-
-        this.log.info(`${that.name} :: Set FanSpeed to => ${value}`);
-
-        // If fan is off, turn it on first
-        if (!that.on_state) {
-            this.log.debug('Fan is off – turn it on first');
-
-            return this.setActiveState(true, function(err) {
-                if (err) {
-                    that.log.error(`Turning on before setting speed failed: ${err.message}`);
-                    return callback(err, that.fan_speed);
-                }
-
-                // Now set FanSpeed
-                that.setFanSpeed(value, callback);
-            });
-        }
-
-        // Fan is on – set FanSpeed directly
-        const hub = that.resolveHub();
-        if (!hub) {
-            return callback(new Error('Hub not resolved yet'), that.fan_speed);
-        }
-        const body = qs.stringify({ speedc: value.toString() });
-        const url = `apiv2/hubs/${hub}/attributes/speedc`;
-
-        that.log.debug(`POST URL: ${url}`);
-        that.log.debug(`POST Body (x-www-form-urlencoded): ${body}`);
-
-        that.makeAuthenticatedRequest('post', url, body, function(err, response) {
-            if (err) {
-                that.log.error(`Error while setting FanSpeed: ${err.message}`);
-                return callback(err, that.fan_speed);
-            }
-
-            that.log.debug(`Response from server: ${JSON.stringify(response)}`);
-
-            that.fan_speed = value;
-            that.cache.fan_speed = value;
-            that.cacheTimestamp.getCurrentState = Date.now();
+            try {
+                that.service.updateCharacteristic(Characteristic.Active, active);
+                that.service.updateCharacteristic(
+                    Characteristic.CurrentHumidifierDehumidifierState,
+                    on_state
+                        ? Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING
+                        : Characteristic.CurrentHumidifierDehumidifierState.INACTIVE
+                );
+            } catch (_) {}
 
             callback();
         });
