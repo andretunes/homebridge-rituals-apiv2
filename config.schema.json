@@ -18,15 +18,20 @@
         "required": true
       },
       "account": {
-        "title": "E-Mail Account",
+        "title": "E-mail",
         "type": "string",
         "required": true
       },
       "password": {
-        "title": "Passwort",
+        "title": "Password",
         "type": "string",
         "format": "password",
         "required": true
+      },
+      "battery": {
+        "title": "Has Battery (original Genie 1.0 only)",
+        "type": "boolean",
+        "default": false
       }
     }
   }

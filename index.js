@@ -51,6 +51,7 @@ function RitualsAccessory(log, config) {
     this.on_state = false;
     this.account = config.account;
     this.password = config.password;
+    this.hasBattery = config.battery === true;
 
     this.key = this.storage.get('key') || 0;
     this.log.debug('RitualsAccessory -> key :: ' + this.key);
@@ -101,6 +102,27 @@ function RitualsAccessory(log, config) {
         .setCharacteristic(Characteristic.SerialNumber, this.hublot)
         .setCharacteristic(Characteristic.FirmwareRevision, this.version);
 
+    if (this.hasBattery) {
+        this.serviceBatt = new Service.Battery('Battery', 'AirFresher');
+        this.serviceBatt
+            .setCharacteristic(Characteristic.BatteryLevel, '100')
+            .setCharacteristic(
+                Characteristic.ChargingState,
+                Characteristic.ChargingState.CHARGING
+            )
+            .setCharacteristic(
+                Characteristic.StatusLowBattery,
+                Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+            )
+            .setCharacteristic(Characteristic.Name, 'Genie Battery');
+    }
+
+    //ChargingState.NOT_CHARGING (0)
+    //ChargingState.CHARGING (1)
+    //ChargingState.NOT_CHARGAEABLE (2)
+    //StatusLowBattery.BATTERY_LEVEL_NORMAL (0)
+    //StatusLowBattery.BATTERY_LEVEL_LOW (1)
+
     // FilterMaintenance service: display fill level + scent
     this.serviceFilter = new Service.FilterMaintenance('Filter', 'AirFresher');
 
@@ -125,6 +147,7 @@ function RitualsAccessory(log, config) {
 
     this.services.push(this.service);
     this.services.push(this.serviceInfo);
+    if (this.serviceBatt) this.services.push(this.serviceBatt);
     this.services.push(this.serviceFilter);
 
     this.discover();
