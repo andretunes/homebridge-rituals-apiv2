@@ -49,6 +49,7 @@ function RitualsAccessory(log, config) {
     this.log.debug('RitualsAccessory -> storage path is :: ' + this.user);
 
     this.on_state = false;
+    this.fan_speed = 1;
     this.account = config.account;
     this.password = config.password;
     this.hasBattery = config.battery === true;
@@ -82,6 +83,17 @@ function RitualsAccessory(log, config) {
     this.service
         .getCharacteristic(Characteristic.CurrentRelativeHumidity)
         .on('get', this.getFillState.bind(this));
+
+    // Intensity control, mapped to speedc (1/2/3 = low/med/high)
+    this.service
+        .getCharacteristic(Characteristic.RotationSpeed)
+        .setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: 1
+        })
+        .on('get', this.getSpeedState.bind(this))
+        .on('set', this.setSpeedState.bind(this));
 
     this.service
         .getCharacteristic(Characteristic.TargetHumidifierDehumidifierState)
@@ -535,6 +547,39 @@ RitualsAccessory.prototype = {
         });
     },
 
+    getSpeedState: function(callback) {
+        const that = this;
+        this.log.debug('RitualsAccessory -> init :: getSpeedState()');
+
+        const now = Date.now();
+        if (this.cacheTimestamp.getSpeedState && (now - this.cacheTimestamp.getSpeedState) < this.cacheDuration) {
+            that.log.debug('Using cached data for getSpeedState');
+            const speed = this.cache.fan_speed ?? 1;
+            return callback(null, speed === 1 ? 33 : speed === 2 ? 66 : 100);
+        }
+
+        const hub = that.resolveHub();
+        if (!hub) {
+            return callback(new Error('Hub not resolved yet'));
+        }
+
+        that.makeAuthenticatedRequest('get', `apiv2/hubs/${hub}/attributes/speedc`, null, function(err, speedRes) {
+            if (err) {
+                that.log.debug(`Error while retrieving speedc: ${err}`);
+                return callback(err);
+            }
+
+            that.log.debug(`speedRes received: ${JSON.stringify(speedRes)}`);
+
+            that.fan_speed = parseInt(speedRes.value, 10) || 1;
+            that.cache.fan_speed = that.fan_speed;
+            that.cacheTimestamp.getSpeedState = now;
+
+            const pct = that.fan_speed === 1 ? 33 : that.fan_speed === 2 ? 66 : 100;
+            callback(null, pct);
+        });
+    },
+
     getFillState: function(callback) {
         const that = this;
         this.log.debug('RitualsAccessory -> init :: getFillState()');
@@ -653,6 +698,50 @@ RitualsAccessory.prototype = {
                         : Characteristic.CurrentHumidifierDehumidifierState.INACTIVE
                 );
             } catch (_) {}
+
+            callback();
+        });
+    },
+
+    setSpeedState: function(value, callback) {
+        const that = this;
+        const pct = Math.max(0, Math.min(100, Math.round(Number(value))));
+        const mapped = (pct >= 67) ? 3 : (pct >= 34) ? 2 : 1;
+
+        this.log.info(`${that.name} :: Set Speed to => ${mapped}`);
+
+        // If off, turn on first
+        if (!that.on_state) {
+            this.log.debug('Genie is off – turn it on first');
+
+            return this.setActiveState(Characteristic.Active.ACTIVE, function(err) {
+                if (err) return callback(err);
+                that.setSpeedState(value, callback);
+            });
+        }
+
+        const hub = that.resolveHub();
+        if (!hub) {
+            return callback(new Error('Hub not resolved yet'));
+        }
+
+        const path = `apiv2/hubs/${hub}/attributes/speedc`;
+        const body = qs.stringify({ speedc: mapped.toString() });
+
+        this.log.debug(`POST URL: ${path}`);
+        this.log.debug(`POST Body (x-www-form-urlencoded): ${body}`);
+
+        that.makeAuthenticatedRequest('post', path, body, function(err, response) {
+            if (err) {
+                that.log.error(`Error while setting speed: ${err.message}`);
+                return callback(err);
+            }
+
+            that.log.debug(`Response from server: ${JSON.stringify(response)}`);
+
+            that.fan_speed = mapped;
+            that.cache.fan_speed = mapped;
+            that.cacheTimestamp.getSpeedState = Date.now();
 
             callback();
         });
