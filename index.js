@@ -67,13 +67,6 @@ function RitualsAccessory(log, config) {
     this.fragance = this.storage.get('fragance') || 'N/A';
     this.log.debug('RitualsAccessory -> fragance :: ' + this.fragance);
 
-    var determinate_model = this.version.split('.');
-    if (determinate_model[determinate_model.length - 1] < 12) {
-        this.model_version = '1.0';
-    } else {
-        this.model_version = '2.0';
-    }
-
     this.service = new Service.HumidifierDehumidifier(this.name, 'AirFresher');
     this.service
         .getCharacteristic(Characteristic.Active)
@@ -104,33 +97,9 @@ function RitualsAccessory(log, config) {
     this.serviceInfo = new Service.AccessoryInformation();
     this.serviceInfo
         .setCharacteristic(Characteristic.Manufacturer, 'Rituals')
-        .setCharacteristic(
-            Characteristic.Model,
-            'Rituals Genie ' + this.model_version
-        )
+        .setCharacteristic(Characteristic.Model, 'Rituals Genie')
         .setCharacteristic(Characteristic.SerialNumber, this.hublot)
         .setCharacteristic(Characteristic.FirmwareRevision, this.version);
-
-    if (this.model_version == '1.0') {
-        this.serviceBatt = new Service.Battery('Battery', 'AirFresher');
-        this.serviceBatt
-            .setCharacteristic(Characteristic.BatteryLevel, '100')
-            .setCharacteristic(
-                Characteristic.ChargingState,
-                Characteristic.ChargingState.CHARGING
-            )
-            .setCharacteristic(
-                Characteristic.StatusLowBattery,
-                Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
-            )
-            .setCharacteristic(Characteristic.Name, 'Genie Battery');
-    }
-
-    //ChargingState.NOT_CHARGING (0)
-    //ChargingState.CHARGING (1)
-    //ChargingState.NOT_CHARGAEABLE (2)
-    //StatusLowBattery.BATTERY_LEVEL_NORMAL (0)
-    //StatusLowBattery.BATTERY_LEVEL_LOW (1)
 
     // FilterMaintenance service: display fill level + scent
     this.serviceFilter = new Service.FilterMaintenance('Filter', 'AirFresher');
@@ -156,7 +125,6 @@ function RitualsAccessory(log, config) {
 
     this.services.push(this.service);
     this.services.push(this.serviceInfo);
-    if (this.serviceBatt) this.services.push(this.serviceBatt);
     this.services.push(this.serviceFilter);
 
     this.discover();
@@ -483,9 +451,10 @@ RitualsAccessory.prototype = {
                 return;
             }
 
-            if (versionRes && versionRes.value) {
-                that.storage.put('version', versionRes.value);
-                that.log.debug(`RitualsAccessory -> Genie firmware version stored :: ${versionRes.value}`);
+            const firmwareVersion = versionRes && (versionRes.title || versionRes.raw);
+            if (firmwareVersion) {
+                that.storage.put('version', firmwareVersion);
+                that.log.debug(`RitualsAccessory -> Genie firmware version stored :: ${firmwareVersion}`);
             }
         });
     },
