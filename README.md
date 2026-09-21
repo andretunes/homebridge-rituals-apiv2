@@ -21,7 +21,7 @@ With this plugin you can do
 - _Siri, turn off the Genie._
 - _Siri, set the Genie to high._
 
-The Genie shows up in the Home app as a Humidifier, with on/off control, an intensity slider (low/medium/high) and the perfume cartridge level shown as a filter.
+By default the Genie shows up in the Home app as a Fan, with on/off control and an intensity slider (low/medium/high) - this keeps existing setups, scenes and automations working exactly as before after an update. If you'd rather see it as a Humidifier (with the perfume cartridge level shown on the dial), opt in with `"humidifier": true` in your config - see [Configuration](#03-configuration-in-configjson) below.
 
 #### Before begin, (assumptions)
 
@@ -51,7 +51,8 @@ One installed, you must modify your config.json file and add the following data:
 2. account (Required) = "xxxx@xxx.com" < that is the mail you are using in Rituals App Registration.
 3. password (Required) = "yyyyyyyy" < that is the password you are using in Rituals App.
 4. name (Optional) = "my Genie" < a name that you can assign, if not, "Genie" name has been assigned.
-5. battery (Optional) = true/false < only set this to `true` if you own the **original Genie 1.0**, which has a battery pack. Defaults to `false` (no Battery service), which is correct for the Genie 2.0.
+5. humidifier (Optional) = true/false < opt-in to show the accessory as a Humidifier instead of a Fan. Defaults to `false` (Fan), so updating the plugin never changes an existing setup's service type - and therefore never breaks scenes/automations built around it - unless you explicitly turn this on. In Humidifier mode, the percentage shown on the Home app's dial is the **remaining perfume cartridge fill level**, not scent intensity - intensity is still controlled separately via the speed slider (RotationSpeed), exactly as in Fan mode.
+6. battery (Optional) = true/false < shows a Battery service on the accessory. Defaults to `true` for backwards compatibility. **Note:** the reading is a static placeholder (100%, always charging) - the Rituals API exposes no real battery telemetry, so this does not reflect an actual measurement. Set to `false` if your Genie has no battery (e.g. the USB-powered Genie 2.0).
 
 SAVE your config.json file and RESTART homebridge.
 
@@ -62,7 +63,8 @@ SAVE your config.json file and RESTART homebridge.
 "name": "My Genie",
 "account": "xxx@xxx.com",
 "password": "yyyyyyy",
-"battery": false
+"humidifier": false,
+"battery": true
 }
 ],
 ```
@@ -78,8 +80,7 @@ If you have more than one genie in your account, use the standard config for the
 "accessory": "Rituals",
 "name": "Genie",
 "account": "xxx@xxx.com",
-"password": "yyyyyyy",
-"battery": false
+"password": "yyyyyyy"
 }
 ],
 ```
@@ -119,7 +120,7 @@ If you have more than one genie in your account, use the standard config for the
 "account": "xxx@xxx.com",
 "password": "yyyyyyy",
 "hub": "f0123456789f0123456789f0123456789f0123456789f0123456789f01234567",
-"battery": true
+"humidifier": true
 },
 {
 "accessory": "Rituals",
@@ -140,11 +141,12 @@ Rituals & Genie are registered trademarks of Rituals Cosmetics Enterprise B.V.
 
 ## 07. ChangeLog
 
-- 2.1.0 Breaking Changes:
-  - Accessory type changed from Fan to HumidifierDehumidifier, since it matches what the Genie actually does much better
-  - RotationSpeed now maps to the real `speedc` intensity levels (low/med/high) documented by the Rituals apiv2, instead of a plain Fan speed
-  - CurrentRelativeHumidity mirrors the perfume fill level, so the Home app's dial shows something meaningful instead of a bare toggle
-  - Removed the unreliable firmware-based Genie 1.0/2.0 detection (a real Genie 2 was being misdetected as 1.0, showing a fake battery at 100%). The Battery service is now opt-in via `"battery": true` in config.json for owners of the original Genie 1.0
+- 2.1.0:
+  - Added an optional Humidifier mode (`"humidifier": true` in config.json). Fan stays the default, so updating alone never changes an existing setup's service type or breaks scenes/automations - switching representations is opt-in and up to you
+  - Intensity control (low/med/high, mapped to the apiv2 `speedc` attribute) is retained/improved from the existing Fan speed slider, and now also works in Humidifier mode via RotationSpeed
+  - In Humidifier mode, CurrentRelativeHumidity mirrors the perfume cartridge fill level so the Home app's dial shows something meaningful - note this is fill level, not scent intensity, which stays on the separate RotationSpeed slider
+  - Removed the unreliable firmware-based Genie 1.0/2.0 detection (a real Genie 2 was being misdetected as 1.0). The Battery service is now an explicit override via `"battery": false` in config.json; defaults to `true` to keep existing setups unchanged. Its reading is a static placeholder (100%, always charging), not a real measurement - the API exposes no actual battery telemetry
+  - FirmwareRevision now updates live once the Genie's real firmware version is fetched, instead of requiring a second restart
   - Manufacturer now shows as "Rituals" in the accessory's HomeKit info
 
 - 2.0.0 Breaking Changes:

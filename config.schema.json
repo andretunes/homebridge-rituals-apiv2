@@ -28,10 +28,15 @@
         "format": "password",
         "required": true
       },
-      "battery": {
-        "title": "Has Battery (original Genie 1.0 only)",
+      "humidifier": {
+        "title": "Show as Humidifier instead of Fan (opt-in, changes the HomeKit service type)",
         "type": "boolean",
         "default": false
+      },
+      "battery": {
+        "title": "Show Battery service (static 100%/charging reading, not a real measurement - untick if your Genie has no battery)",
+        "type": "boolean",
+        "default": true
       }
     }
   }

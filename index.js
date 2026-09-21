@@ -52,7 +52,10 @@ function RitualsAccessory(log, config) {
     this.fan_speed = 1;
     this.account = config.account;
     this.password = config.password;
-    this.hasBattery = config.battery === true;
+    // Opt-in: Fan stays the default so existing scenes/automations keep working after an update
+    this.humidifierMode = config.humidifier === true;
+    // Opt-out: preserves the existing Battery service for upgrading users; set to false to remove it
+    this.hasBattery = config.battery !== false;
 
     this.key = this.storage.get('key') || 0;
     this.log.debug('RitualsAccessory -> key :: ' + this.key);
@@ -69,22 +72,42 @@ function RitualsAccessory(log, config) {
     this.fragance = this.storage.get('fragance') || 'N/A';
     this.log.debug('RitualsAccessory -> fragance :: ' + this.fragance);
 
-    this.service = new Service.HumidifierDehumidifier(this.name, 'AirFresher');
-    this.service
-        .getCharacteristic(Characteristic.Active)
-        .on('get', this.getActiveState.bind(this))
-        .on('set', this.setActiveState.bind(this));
+    if (this.humidifierMode) {
+        this.service = new Service.HumidifierDehumidifier(this.name, 'AirFresher');
+        this.service
+            .getCharacteristic(Characteristic.Active)
+            .on('get', this.getActiveState.bind(this))
+            .on('set', this.setActiveState.bind(this));
 
-    this.service
-        .getCharacteristic(Characteristic.CurrentHumidifierDehumidifierState)
-        .on('get', this.getHumidifierState.bind(this));
+        this.service
+            .getCharacteristic(Characteristic.CurrentHumidifierDehumidifierState)
+            .on('get', this.getHumidifierState.bind(this));
 
-    // Drives the Home app's radial dial with the perfume fill level instead of a static value
-    this.service
-        .getCharacteristic(Characteristic.CurrentRelativeHumidity)
-        .on('get', this.getFillState.bind(this));
+        // Shows the remaining perfume cartridge fill level (not scent intensity, that's RotationSpeed below)
+        this.service
+            .getCharacteristic(Characteristic.CurrentRelativeHumidity)
+            .on('get', this.getFillState.bind(this));
 
-    // Intensity control, mapped to speedc (1/2/3 = low/med/high)
+        this.service
+            .getCharacteristic(Characteristic.TargetHumidifierDehumidifierState)
+            .setProps({
+                validValues: [Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER]
+            })
+            .on('get', (callback) => {
+                callback(null, Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER);
+            })
+            .on('set', (value, callback) => {
+                callback();
+            });
+    } else {
+        this.service = new Service.Fan(this.name, 'AirFresher');
+        this.service
+            .getCharacteristic(Characteristic.On)
+            .on('get', this.getCurrentState.bind(this))
+            .on('set', this.setFanOn.bind(this));
+    }
+
+    // Intensity control, mapped to speedc (1/2/3 = low/med/high) - shared by Fan and Humidifier mode
     this.service
         .getCharacteristic(Characteristic.RotationSpeed)
         .setProps({
@@ -94,18 +117,6 @@ function RitualsAccessory(log, config) {
         })
         .on('get', this.getSpeedState.bind(this))
         .on('set', this.setSpeedState.bind(this));
-
-    this.service
-        .getCharacteristic(Characteristic.TargetHumidifierDehumidifierState)
-        .setProps({
-            validValues: [Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER]
-        })
-        .on('get', (callback) => {
-            callback(null, Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER);
-        })
-        .on('set', (value, callback) => {
-            callback();
-        });
 
     this.serviceInfo = new Service.AccessoryInformation();
     this.serviceInfo
@@ -488,8 +499,13 @@ RitualsAccessory.prototype = {
 
             const firmwareVersion = versionRes && (versionRes.title || versionRes.raw);
             if (firmwareVersion) {
+                that.version = firmwareVersion;
                 that.storage.put('version', firmwareVersion);
                 that.log.debug(`RitualsAccessory -> Genie firmware version stored :: ${firmwareVersion}`);
+
+                try {
+                    that.serviceInfo.updateCharacteristic(Characteristic.FirmwareRevision, firmwareVersion);
+                } catch (_) {}
             }
         });
     },
@@ -661,13 +677,13 @@ RitualsAccessory.prototype = {
         this.log.debug('RitualsAccessory -> finish :: getFillState()');
     },
 
-    setActiveState: function(active, callback) {
+    // Shared by Fan's On and Humidifier's Active - does the actual POST + state/cache bookkeeping
+    setPowerState: function(on_state, callback) {
         const that = this;
         const hub = that.resolveHub();
         if (!hub) {
             return callback(new Error('Hub not resolved yet'), this.on_state);
         }
-        const on_state = active === Characteristic.Active.ACTIVE;
         const setValue = on_state ? '1' : '0';
 
         const path = `apiv2/hubs/${hub}/attributes/fanc`;
@@ -690,17 +706,34 @@ RitualsAccessory.prototype = {
             that.cacheTimestamp.getCurrentState = Date.now();
 
             try {
-                that.service.updateCharacteristic(Characteristic.Active, active);
-                that.service.updateCharacteristic(
-                    Characteristic.CurrentHumidifierDehumidifierState,
-                    on_state
-                        ? Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING
-                        : Characteristic.CurrentHumidifierDehumidifierState.INACTIVE
-                );
+                if (that.humidifierMode) {
+                    that.service.updateCharacteristic(
+                        Characteristic.Active,
+                        on_state ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE
+                    );
+                    that.service.updateCharacteristic(
+                        Characteristic.CurrentHumidifierDehumidifierState,
+                        on_state
+                            ? Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING
+                            : Characteristic.CurrentHumidifierDehumidifierState.INACTIVE
+                    );
+                } else {
+                    that.service.updateCharacteristic(Characteristic.On, on_state);
+                }
             } catch (_) {}
 
             callback();
         });
+    },
+
+    // Humidifier mode's Active set handler
+    setActiveState: function(active, callback) {
+        this.setPowerState(active === Characteristic.Active.ACTIVE, callback);
+    },
+
+    // Fan mode's On set handler
+    setFanOn: function(on, callback) {
+        this.setPowerState(!!on, callback);
     },
 
     setSpeedState: function(value, callback) {
@@ -714,7 +747,7 @@ RitualsAccessory.prototype = {
         if (!that.on_state) {
             this.log.debug('Genie is off – turn it on first');
 
-            return this.setActiveState(Characteristic.Active.ACTIVE, function(err) {
+            return this.setPowerState(true, function(err) {
                 if (err) return callback(err);
                 that.setSpeedState(value, callback);
             });
@@ -742,6 +775,10 @@ RitualsAccessory.prototype = {
             that.fan_speed = mapped;
             that.cache.fan_speed = mapped;
             that.cacheTimestamp.getSpeedState = Date.now();
+
+            // Snap the slider to the exact bucket (33/66/100%) instead of leaving the dragged value
+            const snapPct = mapped === 3 ? 100 : mapped === 2 ? 66 : 33;
+            try { that.service.updateCharacteristic(Characteristic.RotationSpeed, snapPct); } catch (_) {}
 
             callback();
         });
