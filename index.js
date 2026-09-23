@@ -570,6 +570,8 @@ RitualsAccessory.prototype = {
         const now = Date.now();
         if (this.cacheTimestamp.getSpeedState && (now - this.cacheTimestamp.getSpeedState) < this.cacheDuration) {
             that.log.debug('Using cached data for getSpeedState');
+            // Fan mode reports 0% while off (as before); the stored intensity is kept for when it's back on
+            if (!this.humidifierMode && !this.on_state) return callback(null, 0);
             const speed = this.cache.fan_speed ?? 1;
             return callback(null, speed === 1 ? 33 : speed === 2 ? 66 : 100);
         }
@@ -591,6 +593,7 @@ RitualsAccessory.prototype = {
             that.cache.fan_speed = that.fan_speed;
             that.cacheTimestamp.getSpeedState = now;
 
+            if (!that.humidifierMode && !that.on_state) return callback(null, 0);
             const pct = that.fan_speed === 1 ? 33 : that.fan_speed === 2 ? 66 : 100;
             callback(null, pct);
         });
